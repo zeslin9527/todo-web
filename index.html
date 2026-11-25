@@ -42,6 +42,9 @@
       <span class="spinner"></span><span>正在拆分…</span>
     </div>
 
+    <button id="micCancel" type="button" aria-label="取消录音">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
     <button id="micBtn" type="button" aria-label="语音输入">
       <svg viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 15.5a3.4 3.4 0 0 0 3.4-3.4V6.4a3.4 3.4 0 1 0-6.8 0v5.7a3.4 3.4 0 0 0 3.4 3.4Z"/>
@@ -59,7 +62,7 @@
       </div>
     </footer>
 
-    <div id="micCapsule" hidden><span id="micDot"></span>正在聆听 · 再点一次停止 <span id="micInterim"></span></div>
+    <div id="micCapsule" hidden><span id="micDot"></span><span id="micHint">正在聆听…</span> <span id="micInterim"></span></div>
 
     <div id="backdrop" hidden></div>
     <div id="sheetHost"></div>

@@ -317,7 +317,33 @@ input, textarea {
   transition: transform 150ms var(--ease), background 200ms, color 200ms;
 }
 #micBtn svg { width: 34px; height: 34px; }
+#micBtn { touch-action: none; }
+#micBtn.dim { opacity: 0.45; }
 #micBtn:active { transform: translateX(-50%) scale(0.92); }
+
+/* WeChat-style cancel target — appears above the mic while pressing */
+#micCancel {
+  position: absolute;
+  left: 50%;
+  bottom: calc(300px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) scale(0.6);
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 21;
+  transition: transform 180ms var(--spring), opacity 150ms, background 180ms, color 180ms;
+}
+#micCancel svg {
+  width: 26px; height: 26px;
+  stroke: currentColor; stroke-width: 2.2;
+  stroke-linecap: round; fill: none;
+}
+#micCancel.show { opacity: 1; transform: translateX(-50%) scale(1); }
+#micCancel.armed { background: var(--destructive); color: #fff; transform: translateX(-50%) scale(1.15); }
 #micBtn.recording {
   color: #fff;
   background: var(--destructive);

@@ -27,7 +27,7 @@ const STT_OFF = params.get('stt') === '0';
 const SEED_MD = `# 待办
 
 ## 工作
-- [ ] 点下方的蓝色麦克风，说出你的待办
+- [ ] 按住下方的蓝色麦克风，说出你的待办
 
 ## 生活
 - [ ] 长按这条，可以编辑、移动或删除
@@ -46,6 +46,7 @@ const segsEl = $('#segs'), thumbEl = $('#thumb');
 const listEl = $('#list'), splitRow = $('#splitRow');
 const addEl = $('#add'), addCat = $('#addCat'), addGo = $('#addGo'), addField = $('#addField');
 const micBtn = $('#micBtn'), micCapsule = $('#micCapsule'), micInterim = $('#micInterim');
+const micCancel = $('#micCancel'), micHint = $('#micHint');
 const backdrop = $('#backdrop'), sheetHost = $('#sheetHost'), toastEl = $('#toast');
 const importFile = $('#importFile');
 const segEls = [...segsEl.querySelectorAll('.seg')];
@@ -816,18 +817,45 @@ gearBtn.addEventListener('click', () => openSettings());
 
 /* ================= voice & AI split ================= */
 
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+// ?mocksr=1 — stub recognizer so the press-to-talk flow can be exercised in
+// environments without the Speech API (Electron screenshots, desktop dev).
+if (!SR && params.get('mocksr') === '1') {
+  SR = class {
+    constructor() { this.continuous = false; this.interimResults = true; }
+    start() {
+      setTimeout(() => {
+        if (this.onresult) this.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '明天买菜' }, length: 1 }] });
+      }, 300);
+      setTimeout(() => { if (this.onend) this.onend(); }, 30000);
+    }
+    stop() { if (this.onend) this.onend(); }
+    abort() { this.onresult = null; this.onend = null; }
+  };
+}
 let recog = null;
 let recording = false;
 let finalText = '';
 let hadError = false;
 let stopTimer = null;
+let pressing = false;
+let cancelArmed = false;
+let pressStart = 0;
+
+function hideCancelUI() {
+  micCancel.classList.remove('show', 'armed');
+  micBtn.classList.remove('dim');
+  cancelArmed = false;
+}
 
 function setMicUI(on) {
   recording = on;
   micBtn.classList.toggle('recording', on);
   micCapsule.hidden = !on;
-  if (!on) micInterim.textContent = '';
+  if (!on) {
+    micInterim.textContent = '';
+    hideCancelUI();
+  }
 }
 
 function finishRecognition() {
@@ -872,22 +900,78 @@ function startRecognition() {
   }
 }
 
-micBtn.addEventListener('click', () => {
-  if (recording) {
-    try { recog.stop(); } catch (e) { /* ignore */ }
-    // WebKit can swallow onend entirely; force-exit if nothing lands.
-    clearTimeout(stopTimer);
-    stopTimer = setTimeout(() => {
-      if (recording) {
-        try { recog.abort(); } catch (e) { /* ignore */ }
-        finishRecognition();
-      }
-    }, 900);
+function stopRecognition() {
+  try { recog.stop(); } catch (e) { /* ignore */ }
+  // WebKit can swallow onend entirely; force-exit if nothing lands.
+  clearTimeout(stopTimer);
+  stopTimer = setTimeout(() => {
+    if (recording) {
+      try { recog.abort(); } catch (e) { /* ignore */ }
+      finishRecognition();
+    }
+  }, 900);
+}
+
+/* Push-to-talk (WeChat style):
+ *   press & hold  → keep recording; release commits, drag onto the ✕ cancels.
+ *   quick tap     → stays recording until tapped again (desktop-friendly). */
+const QUICK_TAP_MS = 260;
+
+function releasePress(commit) {
+  if (!pressing) return;
+  pressing = false;
+  hideCancelUI();
+  if (!commit) {
+    try { recog.abort(); } catch (e) { /* ignore */ }
+    finalText = '';
+    setMicUI(false);
     return;
   }
+  stopRecognition();
+}
+
+micBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+micBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  if (recording) { stopRecognition(); return; }   // toggled mode: tap stops
   if (!SR || STT_OFF) { openDictation(); return; }
+  pressing = true;
+  pressStart = Date.now();
+  try { micBtn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  micCancel.classList.add('show');
+  micHint.textContent = '正在聆听 · 松开提交 · 上滑取消';
   startRecognition();
 });
+
+micBtn.addEventListener('pointermove', (e) => {
+  if (!pressing) return;
+  const r = micCancel.getBoundingClientRect();
+  const over = e.clientX >= r.left - 12 && e.clientX <= r.right + 12 &&
+               e.clientY >= r.top - 12 && e.clientY <= r.bottom + 12;
+  if (over !== cancelArmed) {
+    cancelArmed = over;
+    micCancel.classList.toggle('armed', over);
+    micBtn.classList.toggle('dim', over);
+    if (over && navigator.vibrate) navigator.vibrate(8);
+    micHint.textContent = over ? '松开手指，取消录音' : '正在聆听 · 松开提交 · 上滑取消';
+  }
+});
+
+micBtn.addEventListener('pointerup', () => {
+  if (!pressing) return;
+  const quickTap = Date.now() - pressStart < QUICK_TAP_MS;
+  if (quickTap && !cancelArmed) {
+    // Toggle mode: keep recording until the next press.
+    pressing = false;
+    hideCancelUI();
+    micHint.textContent = '正在聆听 · 再点一次停止';
+    return;
+  }
+  releasePress(!cancelArmed);
+});
+
+micBtn.addEventListener('pointercancel', () => releasePress(false));
 
 // Fallback modal: iOS keyboard dictation works everywhere, so a plain
 // textarea + the system 🎤 key covers devices without SpeechRecognition.
