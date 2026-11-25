@@ -343,6 +343,7 @@ input, textarea {
   overflow: hidden; text-overflow: ellipsis;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   z-index: 30;
+  pointer-events: none;
 }
 #micCapsule[hidden] { display: none; }
 #micDot {

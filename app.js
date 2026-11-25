@@ -821,12 +821,21 @@ let recog = null;
 let recording = false;
 let finalText = '';
 let hadError = false;
+let stopTimer = null;
 
 function setMicUI(on) {
   recording = on;
   micBtn.classList.toggle('recording', on);
   micCapsule.hidden = !on;
   if (!on) micInterim.textContent = '';
+}
+
+function finishRecognition() {
+  clearTimeout(stopTimer);
+  // Use whatever transcript we got, even if a late error fired.
+  const text = (finalText + micInterim.textContent).trim();
+  setMicUI(false);
+  if (text) runSplit(text);
 }
 
 function startRecognition() {
@@ -836,7 +845,9 @@ function startRecognition() {
     recog = new SR();
     recog.lang = 'zh-CN';
     recog.interimResults = true;
-    recog.continuous = true;
+    // continuous=true hangs forever on iOS Safari — single-utterance mode
+    // also fits "speak one command" UX better.
+    recog.continuous = false;
     recog.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -852,12 +863,7 @@ function startRecognition() {
       setMicUI(false);
       if (!finalText.trim()) openDictation();
     };
-    recog.onend = () => {
-      // Use whatever transcript we got, even if a late error fired.
-      const text = (finalText + micInterim.textContent).trim();
-      setMicUI(false);
-      if (text) runSplit(text);
-    };
+    recog.onend = finishRecognition;
     recog.start();
     setMicUI(true);
   } catch (e) {
@@ -867,7 +873,18 @@ function startRecognition() {
 }
 
 micBtn.addEventListener('click', () => {
-  if (recording) { try { recog.stop(); } catch (e) { /* ignore */ } return; }
+  if (recording) {
+    try { recog.stop(); } catch (e) { /* ignore */ }
+    // WebKit can swallow onend entirely; force-exit if nothing lands.
+    clearTimeout(stopTimer);
+    stopTimer = setTimeout(() => {
+      if (recording) {
+        try { recog.abort(); } catch (e) { /* ignore */ }
+        finishRecognition();
+      }
+    }, 900);
+    return;
+  }
   if (!SR || STT_OFF) { openDictation(); return; }
   startRecognition();
 });
