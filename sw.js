@@ -5,7 +5,7 @@
  * All URLs are relative so the app works under GitHub Pages' /<repo>/ path.
  */
 
-const CACHE = 'todo-v1';
+const CACHE = 'todo-v2';
 const ASSETS = [
   './',
   './index.html',
