@@ -11,7 +11,7 @@
 const T = window.TodoCore;
 const TABS = ['todo', 'completed', 'cancelled'];
 const WEEKDAYS = '日一二三四五六';
-const CAT_PREFIX = /^([\w一-龥 -]{1,20})[:：]\s*(.+)/;
+
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CHECK_DELAY = REDUCED ? 0 : 600;
 const UNCHECK_DELAY = REDUCED ? 0 : 250;
@@ -24,19 +24,15 @@ const MOCK = params.get('mock') === '1';
 const STT_OFF = params.get('stt') === '0';
 
 // Neutral starter data for a fresh install — teaches the two key gestures.
+// No categories on mobile: items land in the default bucket.
 const SEED_MD = `# 待办
 
-## 工作
 - [ ] 按住下方的蓝色麦克风，说出你的待办
-
-## 生活
 - [ ] 长按这条，可以编辑、移动或删除
 `;
 
 let data = { categories: [] };
 let tab = 'todo';
-let collapsed = new Set(JSON.parse(localStorage.getItem('collapsed') || '[]'));
-let lastCat = localStorage.getItem('lastCat') || null;
 let suppressAnim = false;
 let switching = false;
 
@@ -44,7 +40,7 @@ const $ = (s) => document.querySelector(s);
 const dateEl = $('#date'), weekdayEl = $('#weekday'), gearBtn = $('#gearBtn');
 const segsEl = $('#segs'), thumbEl = $('#thumb');
 const listEl = $('#list'), splitRow = $('#splitRow');
-const addEl = $('#add'), addCat = $('#addCat'), addGo = $('#addGo'), addField = $('#addField');
+const addEl = $('#add'), addGo = $('#addGo'), addField = $('#addField');
 const micBtn = $('#micBtn'), micCapsule = $('#micCapsule'), micInterim = $('#micInterim');
 const micCancel = $('#micCancel'), micHint = $('#micHint');
 const backdrop = $('#backdrop'), sheetHost = $('#sheetHost'), toastEl = $('#toast');
@@ -124,16 +120,6 @@ function opRemove(category, index) {
   const cat = findCat(category);
   if (!cat || !cat.items[index]) return;
   cat.items.splice(index, 1);
-  afterMutation();
-}
-
-function opMove(category, index, targetName) {
-  const cat = findCat(category);
-  if (!cat || !cat.items[index] || category === targetName) return;
-  const [item] = cat.items.splice(index, 1);
-  let target = findCat(targetName);
-  if (!target) { target = { name: targetName, items: [] }; data.categories.push(target); }
-  target.items.push(item);
   afterMutation();
 }
 
@@ -396,27 +382,14 @@ function onCheck(row, rw) {
 
 /* ================= sections / reconcile ================= */
 
-function createSection(name) {
+function createSection() {
   const sec = document.createElement('div');
   sec.className = 'cat';
-  sec.dataset.cat = name;
-  sec.dataset.k = `cat${name}`;
-  sec.innerHTML =
-    '<div class="cat-head"><svg class="chev" viewBox="0 0 10 10"><path d="M3 1.5l4 3.5-4 3.5"/></svg>' +
-    '<span class="cat-name"></span></div>' +
-    '<div class="cat-body"><div class="cat-inner"></div></div>';
-  sec.querySelector('.cat-name').textContent = name;
-  sec.querySelector('.cat-head').addEventListener('click', () => {
-    sec.classList.toggle('closed');
-    if (collapsed.has(name)) collapsed.delete(name);
-    else collapsed.add(name);
-    localStorage.setItem('collapsed', JSON.stringify([...collapsed]));
-  });
-  if (collapsed.has(name)) sec.classList.add('closed');
+  sec.innerHTML = '<div class="cat-inner"></div>';
   return sec;
 }
 
-function reconcileRows(sec, name, entries) {
+function reconcileRows(sec, entries) {
   const inner = sec.querySelector('.cat-inner');
   const wanted = new Map(entries.map((e) => [e.key, e]));
   const existing = new Map();
@@ -426,7 +399,7 @@ function reconcileRows(sec, name, entries) {
   for (const [k, rw] of existing) {
     if (!wanted.has(k)) exitRow(rw);
   }
-  for (const { key, item, index } of entries) {
+  for (const { key, item, index, cat } of entries) {
     let rw = existing.get(key);
     if (rw) {
       if (rw.classList.contains('leaving')) {
@@ -437,44 +410,41 @@ function reconcileRows(sec, name, entries) {
       rw.dataset.index = String(index);
       inner.appendChild(rw);
     } else {
-      rw = createRow(name, index, item, key);
+      rw = createRow(cat, index, item, key);
       enterRow(inner, rw);
     }
   }
 }
 
+// Flat list — no categories on mobile. The data model keeps categories for
+// backup/markdown compatibility, but all rows render in one section.
 function reconcile() {
   const before = recordTops();
 
-  const order = [];
+  const occ = {};
+  const entries = [];
   for (const cat of data.categories) {
-    const filtered = cat.items
-      .map((item, index) => ({ item, index }))
-      .filter((e) => e.item.status === tab);
-    if (!filtered.length) continue;
-    const occ = {};
-    const entries = filtered.map(({ item, index }) => {
+    cat.items.forEach((item, index) => {
+      if (item.status !== tab) return;
       const base = `${cat.name}${item.text}`;
       const o = occ[base] || 0;
       occ[base] = o + 1;
-      return { key: `${base}${o}`, item, index };
+      entries.push({ key: `${base}${o}`, item, index, cat: cat.name });
     });
-    order.push({ name: cat.name, entries });
   }
 
-  const wantedNames = new Set(order.map((c) => c.name));
-  for (const sec of [...listEl.querySelectorAll(':scope > .cat')]) {
-    if (!wantedNames.has(sec.dataset.cat)) sec.remove();
-  }
-  for (const { name, entries } of order) {
-    let sec = listEl.querySelector(`:scope > .cat[data-cat="${CSS.escape(name)}"]`);
-    if (!sec) sec = createSection(name);
-    listEl.appendChild(sec);
-    reconcileRows(sec, name, entries);
+  const secs = [...listEl.querySelectorAll(':scope > .cat')];
+  for (const s of secs.slice(1)) s.remove();
+  let sec = secs[0];
+  if (entries.length) {
+    if (!sec) { sec = createSection(); listEl.appendChild(sec); }
+    reconcileRows(sec, entries);
+  } else if (sec) {
+    sec.remove();
   }
 
   let empty = listEl.querySelector(':scope > .empty');
-  if (!order.length) {
+  if (!entries.length) {
     if (!empty) {
       empty = document.createElement('div');
       empty.className = 'empty';
@@ -493,28 +463,17 @@ function reconcile() {
 /* ================= add bar ================= */
 
 function defaultCategory() {
-  if (lastCat && data.categories.some((c) => c.name === lastCat)) return lastCat;
   return data.categories.length ? data.categories[0].name : T.DEFAULT_CATEGORY;
 }
 
-function parseAdd() {
-  const v = addEl.value;
-  const m = CAT_PREFIX.exec(v);
-  if (m) return { category: m[1].trim(), text: m[2].trim() };
-  return { category: defaultCategory(), text: v.trim() };
-}
-
 function updateHint() {
-  addCat.textContent = parseAdd().category;
   addGo.classList.toggle('ready', addEl.value.trim() !== '');
 }
 
 function submitAdd() {
-  const { category, text } = parseAdd();
+  const text = addEl.value.trim();
   if (!text) return;
-  lastCat = category;
-  localStorage.setItem('lastCat', category);
-  opAdd(category, text, 'todo');
+  opAdd(defaultCategory(), text, 'todo');
   addEl.value = '';
   updateHint();
 }
@@ -524,14 +483,6 @@ addEl.addEventListener('focus', () => addField.classList.add('focused'));
 addEl.addEventListener('blur', () => addField.classList.remove('focused'));
 addEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAdd(); });
 addGo.addEventListener('click', submitAdd);
-addCat.addEventListener('click', () => {
-  openCategoryPicker(parseAdd().category, (name) => {
-    lastCat = name;
-    localStorage.setItem('lastCat', name);
-    updateHint();
-    addEl.focus();
-  });
-});
 
 /* ================= sheets ================= */
 
@@ -600,22 +551,6 @@ function openActionSheet({ title, actions }) {
   presentSheet(sh);
 }
 
-function openCategoryPicker(current, onPick) {
-  const cats = data.categories.map((c) => c.name);
-  const actions = cats.map((name) => ({
-    label: name === current ? `✓ ${name}` : name,
-    handler: () => onPick(name),
-  }));
-  actions.push({
-    label: '新分类…',
-    handler: () => openTextSheet('新分类', '', (name) => {
-      const n = name.trim();
-      if (n) onPick(n);
-    }),
-  });
-  openActionSheet({ title: '选择分类', actions });
-}
-
 // Generic card sheet with a header (cancel/title/done) and body.
 function openCardSheet({ title, doneLabel = '完成', build, onDone, doneId }) {
   const sh = makeSheet('csheet');
@@ -671,10 +606,6 @@ function openRowActions(rw, item) {
   actions.push({
     label: '编辑',
     handler: () => openTextSheet('编辑', item.text, (v) => opEdit(category, index, v)),
-  });
-  actions.push({
-    label: '移到分类 ▸',
-    handler: () => openCategoryPicker(category, (name) => opMove(category, index, name)),
   });
   for (const [status, label] of [['todo', '移到待办'], ['completed', '移到已完成'], ['cancelled', '移到已取消']]) {
     if (item.status !== status) {
@@ -1099,24 +1030,19 @@ function openPreview(items) {
       inp.className = 'pv-text';
       inp.value = p.text;
       inp.addEventListener('input', () => { p.text = inp.value; });
-      const cat = document.createElement('button');
-      cat.className = 'pv-cat';
-      cat.textContent = p.category;
-      cat.addEventListener('click', () => {
-        openCategoryPicker(p.category, (name) => { p.category = name; render(); });
-      });
-      row.append(x, inp, cat);
+      row.append(x, inp);
       card.appendChild(row);
     });
   }
   render();
 
   confirmB.addEventListener('click', () => {
+    const catName = defaultCategory();
     for (const p of proposed) {
       const t = p.text.trim();
       if (!t) continue;
-      let cat = findCat(p.category);
-      if (!cat) { cat = { name: p.category, items: [] }; data.categories.push(cat); }
+      let cat = findCat(catName);
+      if (!cat) { cat = { name: catName, items: [] }; data.categories.push(cat); }
       cat.items.push({ id: '', text: t, status: 'todo' });
     }
     afterMutation();
