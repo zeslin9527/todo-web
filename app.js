@@ -959,9 +959,18 @@ async function callLLM(transcript) {
       messages,
       temperature: 0.1,
       max_tokens: 800,
+      // Doubao models think by default → slower + pricier for a simple split.
+      ...(cfg.model.startsWith('doubao') ? { thinking: { type: 'disabled' } } : {}),
     }),
   });
-  if (!res.ok) throw new Error(`http ${res.status}`);
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const ej = await res.json();
+      detail = (ej && ej.error && ej.error.message) || '';
+    } catch (e2) { /* ignore */ }
+    throw new Error(detail ? `${res.status}: ${detail.slice(0, 120)}` : `http ${res.status}`);
+  }
   const j = await res.json();
   const content = j && j.choices && j.choices[0] && j.choices[0].message
     ? j.choices[0].message.content : '';
@@ -979,9 +988,10 @@ function runSplit(transcript) {
   }).catch((e) => {
     splitRow.hidden = true;
     if (e && e.silent) return;
-    toast('拆分失败，请检查网络或 API Key');
+    const msg = e && e.message ? e.message : '拆分失败，请检查网络或 API Key';
+    toast(msg);
     openActionSheet({
-      title: '拆分失败，请检查网络或 API Key',
+      title: msg,
       actions: [
         { label: '仍要添加原文', handler: () => opAdd(defaultCategory(), transcript, 'todo') },
       ],
